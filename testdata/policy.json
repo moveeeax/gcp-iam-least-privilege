@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "etag": "BwXyz123=",
+  "bindings": [
+    {
+      "role": "roles/owner",
+      "members": [
+        "user:admin@example.com",
+        "serviceAccount:ci-deploy@my-proj.iam.gserviceaccount.com"
+      ]
+    },
+    {
+      "role": "roles/editor",
+      "members": [
+        "serviceAccount:app-runtime@my-proj.iam.gserviceaccount.com",
+        "group:platform@example.com"
+      ]
+    },
+    {
+      "role": "roles/viewer",
+      "members": [
+        "serviceAccount:readonly-audit@my-proj.iam.gserviceaccount.com"
+      ]
+    },
+    {
+      "role": "roles/storage.objectViewer",
+      "members": [
+        "serviceAccount:app-runtime@my-proj.iam.gserviceaccount.com"
+      ]
+    }
+  ]
+}
