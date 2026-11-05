@@ -3,6 +3,7 @@
 [![CI](https://github.com/moveeeax/gcp-iam-least-privilege/actions/workflows/ci.yml/badge.svg)](https://github.com/moveeeax/gcp-iam-least-privilege/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/moveeeax/gcp-iam-least-privilege.svg)](https://pkg.go.dev/github.com/moveeeax/gcp-iam-least-privilege)
 [![Go Report Card](https://goreportcard.com/badge/github.com/moveeeax/gcp-iam-least-privilege)](https://goreportcard.com/report/github.com/moveeeax/gcp-iam-least-privilege)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/moveeeax/gcp-iam-least-privilege)](go.mod)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Audit a GCP project's IAM policy for over-broad **primitive roles**
@@ -15,6 +16,8 @@ access, they pile up over time, and nobody trims them. This tool lists the
 offenders and points you at the right family of predefined roles.
 
 ## Install
+
+Requires Go 1.26 or newer (CI tests Go 1.26 and 1.27).
 
 ```sh
 go install github.com/moveeeax/gcp-iam-least-privilege/cmd/gcp-iam-least-privilege@latest
