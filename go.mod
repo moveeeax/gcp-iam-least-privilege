@@ -1,3 +1,3 @@
 module github.com/moveeeax/gcp-iam-least-privilege
 
-go 1.22.5
+go 1.26
