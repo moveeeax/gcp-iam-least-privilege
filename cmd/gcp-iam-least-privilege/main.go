@@ -1,6 +1,6 @@
 // Command gcp-iam-least-privilege audits a GCP project's IAM policy for
-// over-broad primitive roles (Owner/Editor) and suggests narrower predefined
-// roles. It reads a live policy through gcloud-provided credentials or a local
+// over-broad primitive roles (Owner/Editor), public principals and default
+// service accounts, and suggests narrower predefined roles. It reads a live policy through gcloud-provided credentials or a local
 // JSON file for offline use and CI.
 package main
 
@@ -27,12 +27,14 @@ Flags:
   --json                  emit JSON instead of text
   --service-accounts      only report service-account members
   --include-viewer        also flag roles/viewer (low severity)
-  --fail-on-high          exit 2 if any HIGH-severity finding is present
+  --fail-on string        exit 2 if any finding at this severity or above is
+                          present: critical, high or low
+  --fail-on-high          alias for --fail-on high
 
 Exit codes:
   0  no failing findings
   1  usage or runtime error
-  2  HIGH-severity finding present and --fail-on-high set
+  2  finding at or above the --fail-on severity present
 `
 
 func main() {
@@ -50,9 +52,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 		asJSON     = fs.Bool("json", false, "emit JSON")
 		saOnly     = fs.Bool("service-accounts", false, "only report service-account members")
 		incViewer  = fs.Bool("include-viewer", false, "also flag roles/viewer")
-		failOnHigh = fs.Bool("fail-on-high", false, "exit 2 on HIGH findings")
+		failOn     = fs.String("fail-on", "", "exit 2 on findings at this severity or above (critical, high, low)")
+		failOnHigh = fs.Bool("fail-on-high", false, "alias for --fail-on high")
 	)
 	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+
+	threshold, err := failThreshold(*failOn, *failOnHigh)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
 
@@ -89,10 +98,29 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if *failOnHigh && report.HasHighSeverity() {
+	if threshold != "" && report.HasSeverityAtLeast(threshold) {
 		return 2
 	}
 	return 0
+}
+
+// failThreshold resolves --fail-on and its --fail-on-high alias into the
+// minimum severity that fails the run, or "" when neither is set. When both
+// are given the broader threshold wins, so adding one flag never makes an
+// existing gate more permissive.
+func failThreshold(failOn string, failOnHigh bool) (analyzer.Severity, error) {
+	var threshold analyzer.Severity
+	if failOn != "" {
+		sev, err := analyzer.ParseSeverity(failOn)
+		if err != nil {
+			return "", fmt.Errorf("--fail-on: %w", err)
+		}
+		threshold = sev
+	}
+	if failOnHigh && (threshold == "" || threshold == analyzer.SeverityCritical) {
+		threshold = analyzer.SeverityHigh
+	}
+	return threshold, nil
 }
 
 // loadPolicy returns the raw policy bytes and a human label for the project.

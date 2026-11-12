@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "etag": "BwXyz456=",
+  "bindings": [
+    {
+      "role": "roles/editor",
+      "members": [
+        "serviceAccount:123456789012-compute@developer.gserviceaccount.com",
+        "serviceAccount:my-proj@appspot.gserviceaccount.com",
+        "serviceAccount:app-runtime@my-proj.iam.gserviceaccount.com"
+      ]
+    },
+    {
+      "role": "roles/viewer",
+      "members": [
+        "allAuthenticatedUsers",
+        "serviceAccount:123456789012-compute@developer.gserviceaccount.com"
+      ]
+    },
+    {
+      "role": "roles/storage.objectViewer",
+      "members": [
+        "allUsers",
+        "serviceAccount:app-runtime@my-proj.iam.gserviceaccount.com"
+      ]
+    }
+  ]
+}

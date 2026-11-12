@@ -1,5 +1,10 @@
 package analyzer
 
+import (
+	"fmt"
+	"strings"
+)
+
 // Primitive (basic) roles grant coarse, project-wide access and are the
 // standing audit finding this tool exists to catch.
 const (
@@ -20,9 +25,75 @@ var primitiveRoles = map[string]Severity{
 type Severity string
 
 const (
-	SeverityHigh Severity = "HIGH"
-	SeverityLow  Severity = "LOW"
+	SeverityCritical Severity = "CRITICAL"
+	SeverityHigh     Severity = "HIGH"
+	SeverityLow      Severity = "LOW"
 )
+
+// severityRank orders severities for sorting and threshold checks; a higher
+// rank is more severe. Unknown values rank 0.
+var severityRank = map[Severity]int{
+	SeverityLow:      1,
+	SeverityHigh:     2,
+	SeverityCritical: 3,
+}
+
+// ParseSeverity maps a case-insensitive name (critical, high, low) to a
+// Severity.
+func ParseSeverity(s string) (Severity, error) {
+	sev := Severity(strings.ToUpper(strings.TrimSpace(s)))
+	if _, ok := severityRank[sev]; !ok {
+		return "", fmt.Errorf("unknown severity %q (want critical, high or low)", s)
+	}
+	return sev, nil
+}
+
+// AtLeast reports whether s is as severe as min or more.
+func (s Severity) AtLeast(min Severity) bool {
+	return severityRank[s] >= severityRank[min]
+}
+
+// Finding tags mark findings that a primitive-role filter alone would not
+// explain.
+const (
+	// TagPublic marks a binding to allUsers or allAuthenticatedUsers.
+	TagPublic = "public"
+	// TagDefaultSA marks a Compute Engine or App Engine default service
+	// account holding a primitive role.
+	TagDefaultSA = "default-sa"
+)
+
+// Public principals. allUsers is anyone on the internet; allAuthenticatedUsers
+// is anyone signed in to any Google account, not just your organization.
+const (
+	MemberAllUsers              = "allUsers"
+	MemberAllAuthenticatedUsers = "allAuthenticatedUsers"
+)
+
+const (
+	remediationPublic    = "remove the public binding and grant the role to specific principals"
+	remediationDefaultSA = "create a dedicated service account with only the roles the workload needs"
+)
+
+// isPublic reports whether the member is allUsers or allAuthenticatedUsers.
+func isPublic(member string) bool {
+	return member == MemberAllUsers || member == MemberAllAuthenticatedUsers
+}
+
+// isDefaultServiceAccount reports whether the member is the Compute Engine
+// default service account (PROJECT_NUMBER-compute@developer.gserviceaccount.com)
+// or the App Engine default service account (PROJECT_ID@appspot.gserviceaccount.com).
+// Both get roles/editor automatically on projects created without the
+// iam.automaticIamGrantsForDefaultServiceAccounts constraint.
+func isDefaultServiceAccount(member string) bool {
+	email, ok := strings.CutPrefix(member, "serviceAccount:")
+	if !ok {
+		return false
+	}
+	email = strings.ToLower(email)
+	return strings.HasSuffix(email, "-compute@developer.gserviceaccount.com") ||
+		strings.HasSuffix(email, "@appspot.gserviceaccount.com")
+}
 
 // suggestion pairs a narrower predefined role with a short rationale.
 type suggestion struct {
