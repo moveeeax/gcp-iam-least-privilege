@@ -175,3 +175,158 @@ func TestParseToleratesExtraFields(t *testing.T) {
 		t.Errorf("expected 1 binding, got %d", len(p.Bindings))
 	}
 }
+
+func loadPublicFixture(t *testing.T) *Policy {
+	t.Helper()
+	data, err := os.ReadFile("../../testdata/policy-public.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	p, err := ParsePolicyBytes(data)
+	if err != nil {
+		t.Fatalf("parse fixture: %v", err)
+	}
+	return p
+}
+
+func findingFor(rep *Report, member, role string) *Finding {
+	for i := range rep.Findings {
+		if rep.Findings[i].Member == member && rep.Findings[i].Role == role {
+			return &rep.Findings[i]
+		}
+	}
+	return nil
+}
+
+// Any role bound to a public principal is CRITICAL, including predefined
+// roles and roles/viewer without IncludeViewer.
+func TestPublicPrincipalsAreCritical(t *testing.T) {
+	rep := Analyze("my-proj", loadPublicFixture(t), Options{})
+	for _, tc := range []struct{ member, role string }{
+		{"allUsers", "roles/storage.objectViewer"},
+		{"allAuthenticatedUsers", RoleViewer},
+	} {
+		f := findingFor(rep, tc.member, tc.role)
+		if f == nil {
+			t.Fatalf("expected finding for %s on %s, got %+v", tc.member, tc.role, rep.Findings)
+		}
+		if f.Severity != SeverityCritical {
+			t.Errorf("%s: expected CRITICAL, got %s", tc.member, f.Severity)
+		}
+		if f.MemberKind != tc.member {
+			t.Errorf("%s: expected memberKind %q, got %q", tc.member, tc.member, f.MemberKind)
+		}
+		if len(f.Tags) != 1 || f.Tags[0] != TagPublic {
+			t.Errorf("%s: expected tags [%s], got %v", tc.member, TagPublic, f.Tags)
+		}
+		if f.Remediation == "" {
+			t.Errorf("%s: expected a remediation", tc.member)
+		}
+	}
+	if rep.Counts[SeverityCritical] != 2 {
+		t.Errorf("expected 2 CRITICAL findings, got %d", rep.Counts[SeverityCritical])
+	}
+	if rep.Findings[0].Severity != SeverityCritical {
+		t.Errorf("expected CRITICAL findings first, got %s", rep.Findings[0].Severity)
+	}
+	// The non-public member of the predefined-role binding is not a finding.
+	if f := findingFor(rep, "serviceAccount:app-runtime@my-proj.iam.gserviceaccount.com", "roles/storage.objectViewer"); f != nil {
+		t.Errorf("predefined role on a private member should not be flagged")
+	}
+}
+
+func TestDefaultServiceAccountsTagged(t *testing.T) {
+	rep := Analyze("my-proj", loadPublicFixture(t), Options{IncludeViewer: true})
+	for _, m := range []string{
+		"serviceAccount:123456789012-compute@developer.gserviceaccount.com",
+		"serviceAccount:my-proj@appspot.gserviceaccount.com",
+	} {
+		f := findingFor(rep, m, RoleEditor)
+		if f == nil {
+			t.Fatalf("expected editor finding for %s", m)
+		}
+		if f.Severity != SeverityHigh {
+			t.Errorf("%s: expected HIGH, got %s", m, f.Severity)
+		}
+		if len(f.Tags) != 1 || f.Tags[0] != TagDefaultSA {
+			t.Errorf("%s: expected tags [%s], got %v", m, TagDefaultSA, f.Tags)
+		}
+		if !strings.Contains(f.Remediation, "dedicated service account") {
+			t.Errorf("%s: unexpected remediation %q", m, f.Remediation)
+		}
+	}
+	// A user-managed SA with editor is HIGH but not default-sa.
+	if f := findingFor(rep, "serviceAccount:app-runtime@my-proj.iam.gserviceaccount.com", RoleEditor); f == nil || len(f.Tags) != 0 {
+		t.Errorf("expected untagged editor finding for user-managed SA, got %+v", f)
+	}
+	// The default-sa tag applies to owner/editor only, not viewer.
+	if f := findingFor(rep, "serviceAccount:123456789012-compute@developer.gserviceaccount.com", RoleViewer); f == nil || f.Severity != SeverityLow || len(f.Tags) != 0 {
+		t.Errorf("expected untagged LOW viewer finding for default SA, got %+v", f)
+	}
+}
+
+func TestServiceAccountsOnlyDropsPublic(t *testing.T) {
+	rep := Analyze("my-proj", loadPublicFixture(t), Options{ServiceAccountsOnly: true})
+	if rep.Counts[SeverityCritical] != 0 {
+		t.Errorf("expected public principals filtered by ServiceAccountsOnly, got %d CRITICAL", rep.Counts[SeverityCritical])
+	}
+}
+
+func TestIsDefaultServiceAccount(t *testing.T) {
+	for member, want := range map[string]bool{
+		"serviceAccount:123-compute@developer.gserviceaccount.com":          true,
+		"serviceAccount:my-proj@appspot.gserviceaccount.com":                true,
+		"serviceAccount:x@my-proj.iam.gserviceaccount.com":                  false,
+		"user:123-compute@developer.gserviceaccount.com":                    false,
+		"serviceAccount:service-123@compute-system.iam.gserviceaccount.com": false,
+	} {
+		if got := isDefaultServiceAccount(member); got != want {
+			t.Errorf("isDefaultServiceAccount(%q) = %v, want %v", member, got, want)
+		}
+	}
+}
+
+func TestHasSeverityAtLeast(t *testing.T) {
+	rep := &Report{Counts: map[Severity]int{SeverityHigh: 1}}
+	if !rep.HasSeverityAtLeast(SeverityLow) || !rep.HasSeverityAtLeast(SeverityHigh) {
+		t.Errorf("HIGH finding should satisfy low and high thresholds")
+	}
+	if rep.HasSeverityAtLeast(SeverityCritical) {
+		t.Errorf("HIGH finding should not satisfy the critical threshold")
+	}
+	crit := &Report{Counts: map[Severity]int{SeverityCritical: 1}}
+	if !crit.HasHighSeverity() {
+		t.Errorf("CRITICAL finding should count for HasHighSeverity")
+	}
+}
+
+func TestParseSeverity(t *testing.T) {
+	for in, want := range map[string]Severity{"critical": SeverityCritical, "HIGH": SeverityHigh, " Low ": SeverityLow} {
+		got, err := ParseSeverity(in)
+		if err != nil || got != want {
+			t.Errorf("ParseSeverity(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	if _, err := ParseSeverity("medium"); err == nil {
+		t.Errorf("expected error for unknown severity")
+	}
+}
+
+func TestRenderTextShowsTagsAndRemediation(t *testing.T) {
+	rep := Analyze("my-proj", loadPublicFixture(t), Options{})
+	var buf bytes.Buffer
+	if err := rep.RenderText(&buf); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"CRITICAL: 2  HIGH: 3  LOW: 0",
+		"[CRITICAL] allUsers holds roles/storage.objectViewer [public]",
+		"[service account, default-sa]",
+		"fix: create a dedicated service account",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in output:\n%s", want, out)
+		}
+	}
+}

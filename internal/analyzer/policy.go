@@ -48,8 +48,12 @@ func ParsePolicyBytes(data []byte) (*Policy, error) {
 	return &p, nil
 }
 
-// memberKind classifies an IAM member string by its prefix.
+// memberKind classifies an IAM member string by its prefix. The public
+// principals have no prefix and are their own kind.
 func memberKind(member string) string {
+	if isPublic(member) {
+		return member
+	}
 	if i := strings.IndexByte(member, ':'); i >= 0 {
 		return member[:i]
 	}
